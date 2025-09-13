@@ -1,0 +1,60 @@
+- name: Install ollama as a systemd service with podman
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ollama_user: "{{ ansible_user | default('daisuke') }}"
+    ollama_quadlet_dir: "/home/{{ ollama_user }}/.config/containers/systemd"
+    # ollama_data_dir: "/home/{{ ollama_user }}/containers/ollama"   # persistent models
+
+  tasks:
+    - name: Ensure Quadlet dir exists
+      file:
+        path: "{{ ollama_quadlet_dir }}"
+        state: directory
+        owner: "{{ ollama_user }}"
+        mode: "0755"
+
+    - name: Create Ollama Quadlet via Podman module
+    # This writes ~/.config/containers/systemd/ollama.container
+      containers.podman.podman_container:
+        name: ollama
+        image: "docker.io/ollama/ollama:latest"
+        state: quadlet
+        quadlet_filename: "ollama"           # -> ollama.container
+        ports:
+          - "11434:11434"
+        volume:
+          - "ollama:/root/.ollama:Z"
+        device: "nvidia.com/gpu=all"
+        quadlet_options:
+          - "ContainerName=ollama"
+          - |
+            [Service]
+            Restart=always
+            [Install]
+            WantedBy=default.target
+
+      become: true
+      become_user: "{{ ollama_user }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ lookup('ansible.builtin.pipe', 'id -u ' ~ ollama_user) }}"
+
+    - name: systemd --user daemon-reload
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+        scope: user
+      become: true
+      become_user: "{{ ollama_user }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ lookup('ansible.builtin.pipe', 'id -u ' ~ ollama_user) }}"
+
+    - name: Enable & start ollama (user service)
+      ansible.builtin.systemd_service:
+        name: "ollama.service"          # Quadlet turns .container -> .service
+        enabled: true
+        state: started
+        scope: user
+      become: true
+      become_user: "{{ ollama_user }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ lookup('ansible.builtin.pipe', 'id -u ' ~ ollama_user) }}"
